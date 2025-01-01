@@ -1,0 +1,139 @@
+#include <Wire.h>               // Library untuk I2C
+#include <Adafruit_SSD1306.h>   // Library untuk OLED
+#include <RTClib.h>             // Library untuk RTC
+#include <SD.h>                 // Library untuk kartu SD
+#include <FS.h>
+
+// Konfigurasi OLED
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// Konfigurasi RTC
+RTC_DS3231 rtc;
+
+#define SD_CS_PIN 5 // Pin chip select untuk modul SD card
+// Konfigurasi Sensor Sentuh
+#define TOUCH_PIN 34  // Pin untuk sensor sentuh
+#define BUZZER_PIN 15 // Pin untuk buzzer 
+
+// Variabel untuk Data Logger
+int bellCount = 0;          // Variabel untuk menghitung berapa kali bel berbunyi
+File logFile;       // Objek file untuk menyimpan log di SD card
+bool touchDetected = false; // Menyimpan status apakah sentuhan terdeteksi
+
+void setup() {
+  // Inisialisasi Serial Monitor
+  Serial.begin(115200);
+
+  // Inisialisasi OLED
+  if (!display.begin(SSD1306_PAGEADDR, 0x3C)) {
+    Serial.println(F("OLED tidak terdeteksi!"));
+    while (true);
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println(F("Inisialisasi..."));
+  display.display();
+
+  // Inisialisasi RTC
+  if (!rtc.begin()) {
+    Serial.println(F("RTC tidak terdeteksi!"));
+    while (true);
+  }
+  if (rtc.lostPower()) {
+    Serial.println(F("RTC kehilangan daya, menyetel waktu sekarang."));
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // Menyetel waktu sesuai waktu kompilasi
+  }
+
+  // Inisialisasi SD Card
+  if (!SD.begin(SD_CS_PIN)) {
+    Serial.println(F("SD Card gagal diinisialisasi! Pastikan kartu terpasang dengan benar."));
+    while (true);
+  }
+
+  logFile = SD.open("/Gilgamesh.txt", FILE_APPEND);
+  if (logFile) {
+    Serial.println("File opened successfully.");
+    logFile.println("Tanggal,Waktu,Bel ditekan ");
+    logFile.close();
+  } else {
+    Serial.println("Error opening Gilgamesh.txt");
+  }
+
+  // Konfigurasi pin sensor sentuh
+  pinMode(TOUCH_PIN, INPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  // Tampilkan status siap di OLED
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println(F("Sistem Siap!"));
+  display.display();
+}
+
+void loop() {
+  // Baca status sensor sentuh
+  bool currentTouchState = digitalRead(TOUCH_PIN);
+
+  // Proses data hanya jika terjadi sentuhan (HIGH) dan belum diproses sebelumnya
+  if (currentTouchState == HIGH && !touchDetected) {
+    touchDetected = true; // Tandai bahwa sentuhan telah terdeteksi
+    bellCount++;          // Tambahkan hitungan bel
+
+    // Dapatkan waktu dari RTC
+    DateTime now = rtc.now();
+    String timeStamp = String(now.year()) + "-" + String(now.month()) + "-" + String(now.day()) + " " +
+                       String(now.hour()) + ":" + String(now.minute()) + ":" + String(now.second());
+
+    tone(BUZZER_PIN, 1000); // Frekuensi 1000 Hz
+    delay(500); // Durasi 500 ms
+    noTone(BUZZER_PIN);
+
+    // Tampilkan informasi di OLED
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println(F("Bel Berbunyi!"));
+    display.setCursor(0, 10);
+    display.println("Waktu:");
+    display.setCursor(0, 20);
+    display.println(timeStamp);
+    display.setCursor(0, 30);
+    display.println("Total Bel:");
+    display.setCursor(0, 40);
+    display.println(bellCount);
+    display.display();
+    delay(1000);
+
+    // Simpan informasi ke SD card
+    logFile = SD.open("/Gilgamesh.txt", FILE_APPEND);
+    if (logFile) {
+      logFile.println("Waktu: " + timeStamp + ", Bel ke-" + String(bellCount));
+      logFile.flush();
+    } else {
+      Serial.println(F("Gagal menulis ke file log!"));
+    }
+
+    // Tampilkan di Serial Monitor
+    Serial.println("Data: " + timeStamp + ", Bel ke-" + String(bellCount));
+
+    // Hindari pembacaan ulang terlalu cepat
+    delay(500);
+  }
+
+  // Reset deteksi jika sentuhan dilepas
+  if (currentTouchState == LOW) {
+    touchDetected = false;
+  }
+
+  // Perbarui waktu real-time di layar
+  DateTime now = rtc.now();
+  display.setCursor(0, 20); // Lokasi waktu pada layar
+  display.fillRect(0, 20, SCREEN_WIDTH, 10, BLACK); // Bersihkan baris waktu
+  display.setCursor(0, 20);
+  display.println(String(now.year()) + "-" + String(now.month()) + "-" + String(now.day()) + " " +
+                  String(now.hour()) + ":" + String(now.minute()) + ":" + String(now.second()));
+  display.display();
+}
